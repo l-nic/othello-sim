@@ -2,7 +2,6 @@
 
 import argparse
 import simpy
-from copy import deepcopy
 
 DEBUG = True
 
@@ -14,9 +13,11 @@ class OthelloMsgState(object):
     """This class represents the state that each host maintains when
        it processes an OthelloMapMsg and sends out new boards
     """
-    def __init__(self, src_host_id, msg_id, map_cnt):
+    def __init__(self, src_host_id, src_msg_id, msg_id, map_cnt):
         # who to send the result to once all responses arrive
         self.src_host_id = src_host_id
+        # ID of the msg to send the response to
+        self.src_msg_id = src_msg_id
         # ID of the msg that generated this state
         self.msg_id = msg_id
         # number of messages (i.e. boards) that were generated in response to processing msgID
@@ -103,7 +104,7 @@ class OthelloHost(object):
         else:
             print_debug('{}: Host {} generating new map messages'.format(self.env.now, self.ID))
             # remember that we need to receive responses for this msg during the reduce phase
-            self.msg_state[msg.ID] = OthelloMsgState(msg.src_host_id, msg.ID, self.args.branch)
+            self.msg_state[msg.ID] = OthelloMsgState(msg.src_host_id, msg.src_msg_id, msg.ID, self.args.branch)
             # compute new boards and send them back into the network
             for i in range(self.args.branch):
                 new_msg = OthelloMapMsg(msg.max_depth, msg.ID, self.ID, msg.cur_depth+1)
@@ -123,7 +124,7 @@ class OthelloHost(object):
                 print '{}: SIMULATION COMPLETE!'.format(self.env.now)
             else:
                 # all responses have been received so send result upstream
-                new_msg = OthelloReduceMsg(state.src_host_id, state.msg_id)
+                new_msg = OthelloReduceMsg(state.src_host_id, state.src_msg_id)
                 self.env.process(self.transmit_msg(new_msg))
 
     def transmit_msg(self, msg):
@@ -194,9 +195,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--delay', type=int, help='Communication delay between network elements (ns)', default=1000)
     parser.add_argument('--service', type=int, help='Service time at each host (ns)', default=500)
-    parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=3)
+    parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=7)
     parser.add_argument('--branch', type=int, help='Othello game tree branching factor', default=2)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=1)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=2)
     args = parser.parse_args()
 
     # Setup and start the simulation
