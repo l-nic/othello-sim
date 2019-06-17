@@ -3,7 +3,7 @@
 import argparse
 import simpy
 
-DEBUG = True
+DEBUG = False
 
 def print_debug(s):
     if DEBUG:
@@ -87,7 +87,7 @@ class OthelloHost(object):
             elif type(msg) == OthelloReduceMsg:
                 self.handle_reduce_msg(msg)
             else:
-                print '{}: ERROR: Receive invalid msg at host {}:\n\t"{}"'.format(self.env.now, self.ID, str(msg))
+                print '{}: ERROR: Received invalid msg at host {}:\n\t"{}"'.format(self.env.now, self.ID, str(msg))
 
     def handle_map_msg(self, msg):
         """Service the request (i.e. compute new boards) then send new
@@ -95,7 +95,8 @@ class OthelloHost(object):
         """
         # model the service time
         yield self.env.timeout(self.args.service)
-        if msg.cur_depth == msg.max_depth:
+        # only need to go to msg.max_depth-1 because the final machines will each look one more move ahead
+        if msg.cur_depth == msg.max_depth-1:
             print_debug('{}: Host {} starting reduce phase'.format(self.env.now, self.ID))
             # time to start the reduce phase
             new_msg = OthelloReduceMsg(msg.src_host_id, msg.src_msg_id)
@@ -194,18 +195,16 @@ class OthelloSimulator(object):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--delay', type=int, help='Communication delay between network elements (ns)', default=1000)
-    parser.add_argument('--service', type=int, help='Service time at each host (ns)', default=500)
-    parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=7)
-    parser.add_argument('--branch', type=int, help='Othello game tree branching factor', default=2)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=2)
+    parser.add_argument('--service', type=int, help='Service time at each host (ns)', default=1000)
+    parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=100)
+    parser.add_argument('--branch', type=int, help='Othello game tree branching factor', default=3)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=6)
     args = parser.parse_args()
 
     # Setup and start the simulation
     print 'Running Othello Simulation ...'
-    env = simpy.Environment()
-    
+    env = simpy.Environment() 
     s = OthelloSimulator(env, args)
-
     env.run()
 
 if __name__ == '__main__':
