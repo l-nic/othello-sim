@@ -2,8 +2,9 @@
 
 import argparse
 import simpy
+import numpy as np
 
-DEBUG = False
+DEBUG = True
 
 def print_debug(s):
     if DEBUG:
@@ -67,6 +68,8 @@ class OthelloReduceMsg(object):
 class OthelloHost(object):
     """This class represents an Othello host"""
     count = 0
+    service_samples = []
+    branch_samples = []
     def __init__(self, env, args, network):
         self.env = env
         self.args = args
@@ -94,7 +97,9 @@ class OthelloHost(object):
            boards back into the network.
         """
         # model the service time
-        yield self.env.timeout(self.args.service)
+        service_time = np.random.choice(OthelloHost.service_samples)
+        print_debug('{}: Host {} servicing request for {} ns'.format(self.env.now, self.ID, service_time))
+        yield self.env.timeout(service_time)
         # only need to go to msg.max_depth-1 because the final machines will each look one more move ahead
         if msg.cur_depth == msg.max_depth-1:
             print_debug('{}: Host {} starting reduce phase'.format(self.env.now, self.ID))
@@ -103,11 +108,13 @@ class OthelloHost(object):
             # send msg into network (kick this off asynchronously cuz we don't want to model serialization)
             self.env.process(self.transmit_msg(new_msg))
         else:
-            print_debug('{}: Host {} generating new map messages'.format(self.env.now, self.ID))
+            # pick how many new boards will be generated
+            branch_factor = np.random.choice(OthelloHost.branch_samples)
+            print_debug('{}: Host {} generating {} new map messages'.format(self.env.now, self.ID, branch_factor))
             # remember that we need to receive responses for this msg during the reduce phase
-            self.msg_state[msg.ID] = OthelloMsgState(msg.src_host_id, msg.src_msg_id, msg.ID, self.args.branch)
+            self.msg_state[msg.ID] = OthelloMsgState(msg.src_host_id, msg.src_msg_id, msg.ID, branch_factor)
             # compute new boards and send them back into the network
-            for i in range(self.args.branch):
+            for i in range(branch_factor):
                 new_msg = OthelloMapMsg(msg.max_depth, msg.ID, self.ID, msg.cur_depth+1)
                 # send msg into network (kick this off asynchronously cuz we don't want to model serialization)
                 self.env.process(self.transmit_msg(new_msg))
@@ -192,16 +199,29 @@ class OthelloSimulator(object):
         self.hosts[0].queue.put(init_msg)
 
 
+def parse_file(filename, data_type):
+    """Simple helper function to parse samples from a file"""
+    data = []
+    with open(filename) as f:
+        for line in f:
+            try:
+                data.append(data_type(line))
+            except:
+                print "ERROR: invalid line in file: {}".format(line)
+    return data
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--delay', type=int, help='Communication delay between network elements (ns)', default=1000)
-    parser.add_argument('--service', type=int, help='Service time at each host (ns)', default=1000)
+    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/1-level-search.txt')
+    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/move-count.txt')
     parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=100)
-    parser.add_argument('--branch', type=int, help='Othello game tree branching factor', default=3)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=6)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=3)
     args = parser.parse_args()
 
     # Setup and start the simulation
+    OthelloHost.service_samples = parse_file(args.service, float)
+    OthelloHost.branch_samples = parse_file(args.branch, int)
     print 'Running Othello Simulation ...'
     env = simpy.Environment() 
     s = OthelloSimulator(env, args)
