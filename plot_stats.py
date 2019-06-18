@@ -58,6 +58,42 @@ def plot_qsize_cdf(*files):
         print '\t99% = {}'.format(np.percentile(stats['samples'], 99))
         print '\t50% = {}'.format(np.percentile(stats['samples'], 50))
 
+def plot_service_cdf(filename):
+    # parse the sample files
+    label  = os.path.basename(filename).replace('.txt', '')
+    samples = parse_samples(filename)
+
+    print 'Creating plots ...'
+
+    # plot CDF of move counts
+    f1 = plt.figure()
+    plot_cdf(samples, label)
+    plt.title("CDF of Othello 1-level search duration")
+    plt.xlabel("Duration (ns)")
+    plt.ylabel("CDF")
+    plt.grid()
+    plt.legend(loc='lower right')
+    ax = plt.gca()
+    ax.autoscale()
+
+def plot_branch_cdf(filename):
+    # parse the sample files
+    label  = os.path.basename(filename).replace('.txt', '')
+    samples = parse_samples(filename)
+
+    print 'Creating plots ...'
+
+    # plot CDF of move counts
+    f1 = plt.figure()
+    plot_cdf(samples, label)
+    plt.title("CDF of Othello branching factor")
+    plt.xlabel("Number of valid moves")
+    plt.ylabel("CDF")
+    plt.grid()
+    plt.legend(loc='lower right')
+    ax = plt.gca()
+    ax.autoscale()
+
 def plot_cdf(data, label):
     sortData = np.sort(data)
     yvals = np.arange(len(sortData))/float(len(sortData))
@@ -91,12 +127,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--avgQsize', nargs='+', help='Files that contain avg queue size samples', required=False)
     parser.add_argument('--allQsize', nargs='+', help='Files that contain all queue size samples', required=False)
+    parser.add_argument('--service', type=str, help='Files that contains service time samples', required=False)
+    parser.add_argument('--branch', type=str, help='Files that contains branching factor samples', required=False)
     args = parser.parse_args()
 
     if args.avgQsize:
         plot_avg_qsize(*args.avgQsize)
     if args.allQsize:
         plot_qsize_cdf(*args.allQsize)
+    if args.service:
+        plot_service_cdf(args.service)
+    if args.branch:
+        plot_branch_cdf(args.branch)
 
     font = {'family' : 'normal',
             'weight' : 'bold',
