@@ -3,6 +3,7 @@
 import argparse
 import simpy
 import numpy as np
+import os
 
 DEBUG = True
 
@@ -130,6 +131,7 @@ class OthelloHost(object):
             print_debug('{}: Host {} received all responses, sending result upstream'.format(self.env.now, self.ID))
             if state.src_host_id is None:
                 print '{}: SIMULATION COMPLETE!'.format(self.env.now)
+                OthelloSimulator.complete = True
             else:
                 # all responses have been received so send result upstream
                 new_msg = OthelloReduceMsg(state.src_host_id, state.src_msg_id)
@@ -175,6 +177,9 @@ class OthelloSwitch(object):
 
 class OthelloSimulator(object):
     """This class controls the Othello simulation"""
+    complete = False
+    sample_period = 1000
+    out_dir = 'out'
     def __init__(self, env, args):
         self.env = env
         self.args = args
@@ -185,6 +190,11 @@ class OthelloSimulator(object):
         self.connect_hosts()
         
         self.init_sim()
+
+        self.avg_q_times = []
+        self.avg_q_samples = []
+        self.all_q_samples = []
+        self.start_logging()
 
     def create_hosts(self):
         for i in range(self.args.hosts):
@@ -198,6 +208,37 @@ class OthelloSimulator(object):
         init_msg = OthelloMapMsg(self.args.depth)
         self.hosts[0].queue.put(init_msg)
 
+    def start_logging(self):
+        self.env.process(self.print_progress())
+        self.env.process(self.sample_host_queues())
+
+    def print_progress(self):
+        while not OthelloSimulator.complete:
+            print '{}: Simulation running ...'.format(self.env.now)
+            yield self.env.timeout(100000)
+
+    def sample_host_queues(self):
+        """Sample avg host queue occupancy at every time"""
+        while not OthelloSimulator.complete:
+            self.avg_q_times.append(self.env.now)
+            q_samples = [len(h.queue.items) for h in self.hosts]
+            self.avg_q_samples.append(np.average(q_samples))
+            self.all_q_samples += q_samples
+            yield self.env.timeout(OthelloSimulator.sample_period)
+            
+    def dump_logs(self):
+        """Dump any logs recorded during the simulation"""
+        out_dir = os.path.join(os.getcwd(), OthelloSimulator.out_dir)
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+
+        with open(os.path.join(out_dir, 'avg_q_samples.csv'), 'w') as f:
+            for t, q in zip(self.avg_q_times, self.avg_q_samples):
+                f.write('{}, {}\n'.format(t, q))
+
+        with open(os.path.join(out_dir, 'all_q_samples.csv'), 'w') as f:
+            for q in self.all_q_samples:
+                f.write('{}\n'.format(q))
 
 def parse_file(filename, data_type):
     """Simple helper function to parse samples from a file"""
@@ -215,7 +256,7 @@ def main():
     parser.add_argument('--delay', type=int, help='Communication delay between network elements (ns)', default=1000)
     parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/1-level-search.txt')
     parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/move-count.txt')
-    parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=100)
+    parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=10)
     parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=3)
     args = parser.parse_args()
 
@@ -226,6 +267,9 @@ def main():
     env = simpy.Environment() 
     s = OthelloSimulator(env, args)
     env.run()
+
+    # dump simualtion logs
+    s.dump_logs()
 
 if __name__ == '__main__':
     main()
