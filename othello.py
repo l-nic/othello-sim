@@ -5,6 +5,8 @@ import simpy
 import numpy as np
 import os
 
+np.random.seed(1)
+
 DEBUG = True
 
 def print_debug(s):
