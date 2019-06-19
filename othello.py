@@ -156,12 +156,15 @@ class OthelloSwitch(object):
         self.hosts += hosts
 
     def start_switching(self):
+        msg_ID_RR = 0
         while True:
             msg = yield self.queue.get()
             print_debug('{}: Switching msg\n\t"{}"'.format(self.env.now, str(msg)))
             if type(msg) == OthelloMapMsg:
                 # TODO: this isn't a very random hash function ... does it matter?
-                dst = msg.ID % len(self.hosts)
+                # dst = msg.ID % len(self.hosts)
+                dst = msg_ID_RR % len(self.hosts)
+                msg_ID_RR = msg_ID_RR + 1
             elif type(msg) == OthelloReduceMsg:
                 dst = msg.target_host_id
             else:
