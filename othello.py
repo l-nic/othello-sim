@@ -5,9 +5,10 @@ import simpy
 import numpy as np
 import os
 
-np.random.seed(1)
+# np.random.seed(1)
 
-DEBUG = True
+#DEBUG = True
+DEBUG = False
 
 def print_debug(s):
     if DEBUG:
@@ -29,12 +30,18 @@ class OthelloMsgState(object):
         # number of the responses that have arrived so far (incremented during the reduce phase)
         self.response_cnt = 0
 
-class OthelloMapMsg(object):
+class OthelloMsg(object):
+    """This is the base class for Othello messages"""
+    def __init__(self, enq_time=0):
+        self.enq_time = enq_time
+
+class OthelloMapMsg(OthelloMsg):
     """This class represents an Othello map message (i.e. the boards
        that need to be mapped to hosts)
     """
     count = 0
     def __init__(self, max_depth, src_msg_id=0, src_host_id=None, cur_depth=0):
+        super(OthelloMapMsg, self).__init__()
         # maximum depth into the game tree this map message should propagate
         self.max_depth = max_depth
         # ID of the msg that generated this msg
@@ -53,10 +60,11 @@ class OthelloMapMsg(object):
     def add_src(self, src):
         self.sources.append(src)
 
-class OthelloReduceMsg(object):
+class OthelloReduceMsg(OthelloMsg):
     """This class represents an Othello reduce message"""
     count = 0
     def __init__(self, target_host_id, target_msg_id):
+        super(OthelloReduceMsg, self).__init__()
         # ID of the host that this msg should be sent to
         self.target_host_id = target_host_id
         # ID of the map msg for which this msg is a response to
@@ -82,11 +90,19 @@ class OthelloHost(object):
         OthelloHost.count += 1
         self.env.process(self.start_rcv())
         self.msg_state = {}
+        # count the number of messages this host pulled out of the queue
+        self.msg_count = 0
+        # count total queueing delay across all messages
+        self.total_q_delay = 0
+        # count time spent doing real work
+        self.busy_time = 0
 
     def start_rcv(self):
         """Start listening for incomming messages"""
         while True:
             msg = yield self.queue.get()
+            self.msg_count += 1
+            self.total_q_delay += (self.env.now - msg.enq_time)
             print_debug('{}: Received msg at host {}:\n\t"{}"'.format(self.env.now, self.ID, str(msg)))
             if type(msg) == OthelloMapMsg:
                 yield self.env.process(self.handle_map_msg(msg))
@@ -102,14 +118,15 @@ class OthelloHost(object):
         # model the service time
         service_time = np.random.choice(OthelloHost.service_samples)
         print_debug('{}: Host {} servicing request for {} ns'.format(self.env.now, self.ID, service_time))
+        self.busy_time += service_time
         yield self.env.timeout(service_time)
         # only need to go to msg.max_depth-1 because the final machines will each look one more move ahead
         if msg.cur_depth == msg.max_depth-1:
             print_debug('{}: Host {} starting reduce phase'.format(self.env.now, self.ID))
             # time to start the reduce phase
             new_msg = OthelloReduceMsg(msg.src_host_id, msg.src_msg_id)
-            # send msg into network (kick this off asynchronously cuz we don't want to model serialization)
-            self.env.process(self.transmit_msg(new_msg))
+            # send msg into network 
+            self.transmit_msg(new_msg)
         else:
             # pick how many new boards will be generated
             branch_factor = np.random.choice(OthelloHost.branch_samples)
@@ -119,8 +136,8 @@ class OthelloHost(object):
             # compute new boards and send them back into the network
             for i in range(branch_factor):
                 new_msg = OthelloMapMsg(msg.max_depth, msg.ID, self.ID, msg.cur_depth+1)
-                # send msg into network (kick this off asynchronously cuz we don't want to model serialization)
-                self.env.process(self.transmit_msg(new_msg))
+                # send msg into network 
+                self.transmit_msg(new_msg)
 
     def handle_reduce_msg(self, msg): 
         """Wait to receive all responses then forward result up the tree"""
@@ -134,16 +151,26 @@ class OthelloHost(object):
             if state.src_host_id is None:
                 print '{}: SIMULATION COMPLETE!'.format(self.env.now)
                 OthelloSimulator.complete = True
+                OthelloSimulator.finish_time = self.env.now
             else:
                 # all responses have been received so send result upstream
                 new_msg = OthelloReduceMsg(state.src_host_id, state.src_msg_id)
-                self.env.process(self.transmit_msg(new_msg))
+                self.transmit_msg(new_msg)
 
     def transmit_msg(self, msg):
-        # model the communication delay
-        yield self.env.timeout(self.args.delay)
         # put the message into the network queue
         self.network.put(msg)
+
+    def report_avg_util(self):
+        """Report avg CPU utilization. Should be invoked after the simulation completes"""
+        return float(self.busy_time)/float(OthelloSimulator.finish_time)
+
+    def report_exp_avg_qsize(self):
+        """Report the expected avg queue size. Should be invoked after the simulation completes"""
+        avg_arrival_rate = float(self.msg_count)/float(OthelloSimulator.finish_time)
+        avg_qtime = float(self.total_q_delay)/float(self.msg_count)
+        # compute avg qsize using Little's result
+        return avg_arrival_rate*avg_qtime
 
 class OthelloSwitch(object):
     """This class represents an Othello network switch"""
@@ -158,15 +185,12 @@ class OthelloSwitch(object):
         self.hosts += hosts
 
     def start_switching(self):
-        msg_ID_RR = 0
         while True:
             msg = yield self.queue.get()
             print_debug('{}: Switching msg\n\t"{}"'.format(self.env.now, str(msg)))
             if type(msg) == OthelloMapMsg:
-                # TODO: this isn't a very random hash function ... does it matter?
+                # This hashing function leads to perfect hashing if there is enough hosts
                 dst = msg.ID % len(self.hosts)
-                # dst = msg_ID_RR % len(self.hosts)
-                # msg_ID_RR = msg_ID_RR + 1
             elif type(msg) == OthelloReduceMsg:
                 dst = msg.target_host_id
             else:
@@ -175,14 +199,16 @@ class OthelloSwitch(object):
             self.env.process(self.transmit_msg(msg, dst))
 
     def transmit_msg(self, msg, dst):
-        # model the communication delay between switch and host
+        # model the network communication delay
         yield self.env.timeout(self.args.delay)
         # put the message in the host's queue
+        msg.enq_time = self.env.now
         self.hosts[dst].queue.put(msg)
 
 class OthelloSimulator(object):
     """This class controls the Othello simulation"""
     complete = False
+    finish_time = 0
     sample_period = 1000
     out_dir = 'out'
     def __init__(self, env, args):
@@ -237,13 +263,25 @@ class OthelloSimulator(object):
         if not os.path.exists(out_dir):
             os.makedirs(out_dir)
 
+        # log the measured avg queue sizes
         with open(os.path.join(out_dir, 'avg_q_samples.csv'), 'w') as f:
             for t, q in zip(self.avg_q_times, self.avg_q_samples):
                 f.write('{}, {}\n'.format(t, q))
 
+        # log all queue size samples
         with open(os.path.join(out_dir, 'all_q_samples.csv'), 'w') as f:
             for q in self.all_q_samples:
                 f.write('{}\n'.format(q))
+
+        # log the expected long term avg queue occupancy per-host
+        with open(os.path.join(out_dir, 'expected_avg_qsizes.csv'), 'w') as f:
+            for h in self.hosts:
+                f.write('{}, {}\n'.format(h.ID, h.report_exp_avg_qsize()))
+
+        # log the average CPU utilization of each host
+        with open(os.path.join(out_dir, 'cpu_utilization.csv'), 'w') as f:
+            for h in self.hosts:
+                f.write('{}, {}\n'.format(h.ID, h.report_avg_util()))
 
 def parse_file(filename, data_type):
     """Simple helper function to parse samples from a file"""
@@ -258,11 +296,11 @@ def parse_file(filename, data_type):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--delay', type=int, help='Communication delay between network elements (ns)', default=1000)
-    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/1-level-search.txt')
-    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/move-count.txt')
-    parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=10)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=3)
+    parser.add_argument('--delay', type=int, help='Network communication delay (ns)', default=2000)
+    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/service-1000.txt') #'dist/1-level-search.txt')
+    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/branch-5.txt') #'dist/move-count.txt')
+    parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=1000)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=8)
     args = parser.parse_args()
 
     # Setup and start the simulation

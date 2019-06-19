@@ -12,7 +12,8 @@ def plot_avg_qsize(*files):
     for f in files:
         stats = {}
         stats['label'] = os.path.basename(f).replace('.csv', '')
-        stats['time'], stats['qsize'] = parse_time_samples(f)
+        stats['time'], stats['qsize'] = parse_xy_samples(f)
+        stats['avg_qsize'] = np.average(stats['qsize'])
         log_stats.append(stats)
 
     print 'Creating plots ...'
@@ -20,7 +21,8 @@ def plot_avg_qsize(*files):
     # plot avg qsize time series
     f1 = plt.figure()
     for stats in log_stats:
-        plt.plot(stats['time'], stats['qsize'], label=stats['label'], linestyle='-', marker='o')
+        l = plt.plot(stats['time'], stats['qsize'], label=stats['label'], linestyle='-', marker='o')
+        plt.axhline(y=stats['avg_qsize'], color=l[0].get_color(), label='{}-avg'.format(stats['label']), linestyle=':')
     plt.title("Time Series of Avg Host Queue Occupancy")
     plt.xlabel("Time (ns)")
     plt.ylabel("Queue Size (messages)")
@@ -57,6 +59,54 @@ def plot_qsize_cdf(*files):
         print '{} Statistics:'.format(stats['label'])
         print '\t99% = {}'.format(np.percentile(stats['samples'], 99))
         print '\t50% = {}'.format(np.percentile(stats['samples'], 50))
+
+def plot_exp_avg_qsize(*files):
+    # parse the sample files
+    log_stats = []
+    for f in files:
+        stats = {}
+        stats['label'] = os.path.basename(f).replace('.csv', '')
+        stats['hostID'], stats['qsize'] = parse_xy_samples(f)
+        stats['avg_qsize'] = np.average(stats['qsize'])
+        log_stats.append(stats)
+
+    print 'Creating plots ...'
+
+    # plot expected avg qsize for each host
+    f1 = plt.figure()
+    for stats in log_stats:
+        l = plt.plot(stats['hostID'], stats['qsize'], label=stats['label'], linestyle='-', marker='o')
+        plt.axhline(y=stats['avg_qsize'], color=l[0].get_color(), label='{}-avg'.format(stats['label']), linestyle=':')
+    plt.title("Expected Avg Queue Size For Each Host")
+    plt.xlabel("Host ID")
+    plt.ylabel("Avg Queue Size (messages)")
+    plt.grid()
+    plt.legend(loc='upper right')
+    ax = plt.gca()
+    ax.autoscale()
+
+def plot_cpu_util(*files):
+    # parse the sample files
+    log_stats = []
+    for f in files:
+        stats = {}
+        stats['label'] = os.path.basename(f).replace('.csv', '')
+        stats['hostID'], stats['util'] = parse_xy_samples(f)
+        log_stats.append(stats)
+
+    print 'Creating plots ...'
+
+    # plot expected avg qsize for each host
+    f1 = plt.figure()
+    for stats in log_stats:
+        plt.plot(stats['hostID'], stats['util'], label=stats['label'], linestyle='-', marker='o')
+    plt.title("Avg CPU Utilization For Each Host")
+    plt.xlabel("Host ID")
+    plt.ylabel("Avg CPU Utilization")
+    plt.grid()
+    plt.legend(loc='upper right')
+    ax = plt.gca()
+    ax.autoscale()
 
 def plot_service_cdf(filename):
     # parse the sample files
@@ -99,7 +149,7 @@ def plot_cdf(data, label):
     yvals = np.arange(len(sortData))/float(len(sortData))
     plt.plot(sortData, yvals, label=label, linestyle='-', marker='o')
 
-def parse_time_samples(filename):
+def parse_xy_samples(filename):
     time = []
     data = []
     with open(filename) as f:
@@ -127,6 +177,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--avgQsize', nargs='+', help='Files that contain avg queue size samples', required=False)
     parser.add_argument('--allQsize', nargs='+', help='Files that contain all queue size samples', required=False)
+    parser.add_argument('--expAvgQsize', nargs='+', help='Files that contain expected avg qsize per host', required=False)
+    parser.add_argument('--cpuUtil', nargs='+', help='Files that contain avg CPU utilization per host', required=False)
     parser.add_argument('--service', type=str, help='Files that contains service time samples', required=False)
     parser.add_argument('--branch', type=str, help='Files that contains branching factor samples', required=False)
     args = parser.parse_args()
@@ -135,6 +187,10 @@ def main():
         plot_avg_qsize(*args.avgQsize)
     if args.allQsize:
         plot_qsize_cdf(*args.allQsize)
+    if args.expAvgQsize:
+        plot_exp_avg_qsize(*args.expAvgQsize)
+    if args.cpuUtil:
+        plot_cpu_util(*args.cpuUtil)
     if args.service:
         plot_service_cdf(args.service)
     if args.branch:
