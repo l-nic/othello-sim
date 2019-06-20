@@ -114,10 +114,10 @@ class OthelloHost(object):
 
         # configure the access time of the next message read by the host
         qsize = len(self.queue.items)
-        if qsize > self.args.nicBufSize + self.args.llcSize:
+        if self.args.nicType == 'mem' or qsize > self.args.nicBufSize + self.args.llcSize:
             access_time = self.args.memAccessTime
             self.mem_count += 1
-        elif qsize > self.args.nicBufSize:
+        elif self.args.nicType == 'ddio' or qsize > self.args.nicBufSize:
             access_time = self.args.llcAccessTime
             self.llc_count += 1
         else:
@@ -382,7 +382,7 @@ def dump_completion_times(completion_times):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--netDelay', type=int, help='NIC-to-NIC communication delay (ns)', default=1000)
-    parser.add_argument('--nicType', type=str, help='NIC-to-CPU interface type (reg, ddio, mem)', default='reg')
+    parser.add_argument('--nicType', type=str, help='NIC-to-CPU interface type (reg, ddio, mem)', default='mem')
     parser.add_argument('--nicBufSize', type=int, help='Buffer size on NIC (# messages) before overflow into LLC/MainMem', default=100)
     parser.add_argument('--llcSize', type=int, help='Num messages that can be stored in the LLC before overflow into MainMem', default=1000)
     parser.add_argument('--memDelay', type=int, help='NIC-to-MainMem delay', default=1000)
@@ -391,10 +391,10 @@ def main():
     parser.add_argument('--memAccessTime', type=int, help='Time to fetch msg from main memory', default=100)
     parser.add_argument('--llcAccessTime', type=int, help='Time to fetch msg from LLC', default=10)
     parser.add_argument('--regAccessTime', type=int, help='Time to fetch msg from register file', default=0)
-    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/1-level-search.txt') #'dist/service-1000.txt')
-    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/move-count.txt') #'dist/branch-5.txt')
+    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/service-1000.txt') #'dist/1-level-search.txt')
+    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/branch-5.txt') #'dist/move-count.txt')
     parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=1000)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=5)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=8)
     parser.add_argument('--runs', type=int, help='The number of simulation runs to perform', default=1)
     args = parser.parse_args()
 
