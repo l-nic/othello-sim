@@ -7,8 +7,8 @@ import os
 
 # np.random.seed(1)
 
-#DEBUG = True
-DEBUG = False
+DEBUG = True
+#DEBUG = False
 
 def print_debug(s):
     if DEBUG:
@@ -34,6 +34,7 @@ class OthelloMsg(object):
     """This is the base class for Othello messages"""
     def __init__(self, enq_time=0):
         self.enq_time = enq_time
+
 
 class OthelloMapMsg(OthelloMsg):
     """This class represents an Othello map message (i.e. the boards
@@ -96,11 +97,41 @@ class OthelloHost(object):
         self.total_q_delay = 0
         # count time spent doing real work
         self.busy_time = 0
+        # Model memory access times to fetch messages
+        self.access_time_stack = []
+        # Memory access stats
+        self.reg_count = 0
+        self.llc_count = 0
+        self.mem_count = 0
+
+    def enqueue_msg(self, msg):
+        """Put the provided msg into the queue. Depending on the current size
+           of the queue, the message might evict old messages deeper into the
+           memory hierarchy.
+        """
+        msg.enq_time = self.env.now
+        self.queue.put(msg)
+
+        # configure the access time of the next message read by the host
+        qsize = len(self.queue.items)
+        if qsize > self.args.nicBufSize + self.args.llcSize:
+            access_time = self.args.memAccessTime
+            self.mem_count += 1
+        elif qsize > self.args.nicBufSize:
+            access_time = self.args.llcAccessTime
+            self.llc_count += 1
+        else:
+            access_time = self.args.regAccessTime
+            self.reg_count += 1
+        self.access_time_stack.append(access_time)
 
     def start_rcv(self):
         """Start listening for incomming messages"""
         while True:
             msg = yield self.queue.get()
+            # model the memory access time
+            access_time = self.access_time_stack.pop()
+            yield self.env.timeout(access_time)
             self.msg_count += 1
             self.total_q_delay += (self.env.now - msg.enq_time)
             print_debug('{}: Received msg at host {}:\n\t"{}"'.format(self.env.now, self.ID, str(msg)))
@@ -168,7 +199,10 @@ class OthelloHost(object):
     def report_exp_avg_qsize(self):
         """Report the expected avg queue size. Should be invoked after the simulation completes"""
         avg_arrival_rate = float(self.msg_count)/float(OthelloSimulator.finish_time)
-        avg_qtime = float(self.total_q_delay)/float(self.msg_count)
+        if self.msg_count > 0:
+            avg_qtime = float(self.total_q_delay)/float(self.msg_count)
+        else:
+            avg_qtime = 0
         # compute avg qsize using Little's result
         return avg_arrival_rate*avg_qtime
 
@@ -200,10 +234,23 @@ class OthelloSwitch(object):
 
     def transmit_msg(self, msg, dst):
         # model the network communication delay
-        yield self.env.timeout(self.args.delay)
+        delay = self.lookup_comm_delay()
+        yield self.env.timeout(delay)
         # put the message in the host's queue
-        msg.enq_time = self.env.now
-        self.hosts[dst].queue.put(msg)
+        self.hosts[dst].enqueue_msg(msg)
+
+    def lookup_comm_delay(self):
+        """The communication delay consists of network fabric delay + delay from NIC into the
+           appropriate memory location.
+        """
+        comm_delay = self.args.netDelay
+        if self.args.nicType == 'mem':
+            comm_delay += self.args.memDelay
+        elif self.args.nicType == 'ddio':
+            comm_delay += self.args.llcDelay
+        else:
+            comm_delay += self.args.regDelay
+        return comm_delay
 
 class OthelloSimulator(object):
     """This class controls the Othello simulation"""
@@ -217,6 +264,8 @@ class OthelloSimulator(object):
         self.hosts = []
         self.switch = OthelloSwitch(self.env, self.args)
 
+        OthelloSimulator.complete = False
+        OthelloSimulator.finish_time = 0
         OthelloMapMsg.count = 0
         OthelloReduceMsg.count = 0
         OthelloHost.count = 0
@@ -240,10 +289,8 @@ class OthelloSimulator(object):
         self.switch.add_hosts(self.hosts)
 
     def init_sim(self):
-        OthelloSimulator.complete = False
-        OthelloSimulator.finish_time = 0
         init_msg = OthelloMapMsg(self.args.depth)
-        self.hosts[0].queue.put(init_msg)
+        self.hosts[0].enqueue_msg(init_msg)
 
     def start_logging(self):
         self.env.process(self.print_progress())
@@ -289,6 +336,13 @@ class OthelloSimulator(object):
             for h in self.hosts:
                 f.write('{}, {}\n'.format(h.ID, h.report_avg_util()))
 
+        # log the total number of messages fetched from regs vs LLC vs MainMem
+        with open(os.path.join(out_dir, 'mem_access_counts.csv'), 'w') as f:
+            reg_count = np.sum([h.reg_count for h in self.hosts])
+            llc_count = np.sum([h.llc_count for h in self.hosts])
+            mem_count = np.sum([h.mem_count for h in self.hosts])
+            f.write('Register, {}\nLLC, {}\nMainMemory, {}'.format(reg_count, llc_count, mem_count))
+
 def parse_file(filename, data_type):
     """Simple helper function to parse samples from a file"""
     data = []
@@ -310,12 +364,21 @@ def dump_completion_times(completion_times):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--delay', type=int, help='Network communication delay (ns)', default=1000)
-    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/1-level-search.txt') #'dist/service-1000.txt')
-    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/move-count.txt') #'dist/branch-5.txt')
+    parser.add_argument('--netDelay', type=int, help='NIC-to-NIC communication delay (ns)', default=1000)
+    parser.add_argument('--nicType', type=str, help='NIC-to-CPU interface type (reg, ddio, mem)', default='reg')
+    parser.add_argument('--nicBufSize', type=int, help='Buffer size on NIC (# messages) before overflow into LLC/MainMem', default=100)
+    parser.add_argument('--llcSize', type=int, help='Num messages that can be stored in the LLC before overflow into MainMem', default=1000)
+    parser.add_argument('--memDelay', type=int, help='NIC-to-MainMem delay', default=1000)
+    parser.add_argument('--llcDelay', type=int, help='NIC-to-LLC delay', default=1000)
+    parser.add_argument('--regDelay', type=int, help='NIC-to-RegFile delay', default=200)
+    parser.add_argument('--memAccessTime', type=int, help='Time to fetch msg from main memory', default=100)
+    parser.add_argument('--llcAccessTime', type=int, help='Time to fetch msg from LLC', default=10)
+    parser.add_argument('--regAccessTime', type=int, help='Time to fetch msg from register file', default=0)
+    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/service-1000.txt') #'dist/1-level-search.txt')
+    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/branch-5.txt') #'dist/move-count.txt')
     parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=1000)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=6)
-    parser.add_argument('--runs', type=int, help='The number of simulation runs to perform', default=300)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=2)
+    parser.add_argument('--runs', type=int, help='The number of simulation runs to perform', default=1)
     args = parser.parse_args()
 
     # Setup and start the simulation
