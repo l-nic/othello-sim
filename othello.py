@@ -7,8 +7,8 @@ import os
 
 # np.random.seed(1)
 
-DEBUG = True
-#DEBUG = False
+#DEBUG = True
+DEBUG = False
 
 def print_debug(s):
     if DEBUG:
@@ -129,18 +129,35 @@ class OthelloHost(object):
         """Start listening for incomming messages"""
         while True:
             msg = yield self.queue.get()
-            # model the memory access time
-            access_time = self.access_time_stack.pop()
-            yield self.env.timeout(access_time)
-            self.msg_count += 1
-            self.total_q_delay += (self.env.now - msg.enq_time)
-            print_debug('{}: Received msg at host {}:\n\t"{}"'.format(self.env.now, self.ID, str(msg)))
-            if type(msg) == OthelloMapMsg:
-                yield self.env.process(self.handle_map_msg(msg))
-            elif type(msg) == OthelloReduceMsg:
-                self.handle_reduce_msg(msg)
+            if self.args.hosts == 1:
+                yield self.env.process(self.search_single_host(msg.max_depth, 0))
+                print '{}: SIMULATION COMPLETE!'.format(self.env.now)
+                OthelloSimulator.complete = True
+                OthelloSimulator.finish_time = self.env.now
             else:
-                print '{}: ERROR: Received invalid msg at host {}:\n\t"{}"'.format(self.env.now, self.ID, str(msg))
+                # model the memory access time
+                access_time = self.access_time_stack.pop()
+                yield self.env.timeout(access_time)
+                self.msg_count += 1
+                self.total_q_delay += (self.env.now - msg.enq_time)
+                print_debug('{}: Received msg at host {}:\n\t"{}"'.format(self.env.now, self.ID, str(msg)))
+                if type(msg) == OthelloMapMsg:
+                    yield self.env.process(self.handle_map_msg(msg))
+                elif type(msg) == OthelloReduceMsg:
+                    self.handle_reduce_msg(msg)
+                else:
+                    print '{}: ERROR: Received invalid msg at host {}:\n\t"{}"'.format(self.env.now, self.ID, str(msg))
+
+    def search_single_host(self, max_depth, cur_depth):
+        """Model the single core search implementation
+        """
+        service_time = np.random.choice(OthelloHost.service_samples)
+        yield self.env.timeout(service_time)
+
+        if cur_depth < max_depth-1:
+            num_children = np.random.choice(OthelloHost.branch_samples)
+            for i in range(num_children):
+                yield self.env.process(self.search_single_host(max_depth, cur_depth+1))
 
     def handle_map_msg(self, msg):
         """Service the request (i.e. compute new boards) then send new
@@ -374,10 +391,10 @@ def main():
     parser.add_argument('--memAccessTime', type=int, help='Time to fetch msg from main memory', default=100)
     parser.add_argument('--llcAccessTime', type=int, help='Time to fetch msg from LLC', default=10)
     parser.add_argument('--regAccessTime', type=int, help='Time to fetch msg from register file', default=0)
-    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/service-1000.txt') #'dist/1-level-search.txt')
-    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/branch-5.txt') #'dist/move-count.txt')
+    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/1-level-search.txt') #'dist/service-1000.txt')
+    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/move-count.txt') #'dist/branch-5.txt')
     parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=1000)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=2)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=5)
     parser.add_argument('--runs', type=int, help='The number of simulation runs to perform', default=1)
     args = parser.parse_args()
 
