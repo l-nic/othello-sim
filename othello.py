@@ -217,6 +217,10 @@ class OthelloSimulator(object):
         self.hosts = []
         self.switch = OthelloSwitch(self.env, self.args)
 
+        OthelloMapMsg.count = 0
+        OthelloReduceMsg.count = 0
+        OthelloHost.count = 0
+
         self.create_hosts()
         self.connect_hosts()
         
@@ -236,6 +240,8 @@ class OthelloSimulator(object):
         self.switch.add_hosts(self.hosts)
 
     def init_sim(self):
+        OthelloSimulator.complete = False
+        OthelloSimulator.finish_time = 0
         init_msg = OthelloMapMsg(self.args.depth)
         self.hosts[0].queue.put(init_msg)
 
@@ -294,25 +300,39 @@ def parse_file(filename, data_type):
                 print "ERROR: invalid line in file: {}".format(line)
     return data
 
+def dump_completion_times(completion_times):
+    out_dir = os.path.join(os.getcwd(), OthelloSimulator.out_dir)
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+    with open(os.path.join(out_dir, 'completion_times.csv'), 'w') as f:
+        for t in completion_times:
+            f.write('{}\n'.format(t))
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--delay', type=int, help='Network communication delay (ns)', default=2000)
-    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/service-1000.txt') #'dist/1-level-search.txt')
-    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/branch-5.txt') #'dist/move-count.txt')
+    parser.add_argument('--delay', type=int, help='Network communication delay (ns)', default=1000)
+    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/1-level-search.txt') #'dist/service-1000.txt')
+    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/move-count.txt') #'dist/branch-5.txt')
     parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=1000)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=8)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=6)
+    parser.add_argument('--runs', type=int, help='The number of simulation runs to perform', default=300)
     args = parser.parse_args()
 
     # Setup and start the simulation
     OthelloHost.service_samples = parse_file(args.service, float)
     OthelloHost.branch_samples = parse_file(args.branch, int)
+    completion_times = []
     print 'Running Othello Simulation ...'
-    env = simpy.Environment() 
-    s = OthelloSimulator(env, args)
-    env.run()
+    for i in range(args.runs):
+        env = simpy.Environment() 
+        s = OthelloSimulator(env, args)
+        env.run()
+        completion_times.append(OthelloSimulator.finish_time)
+        if args.runs == 1:
+            # only dump simualtion logs if we're doing a single run
+            s.dump_logs()
 
-    # dump simualtion logs
-    s.dump_logs()
+    dump_completion_times(completion_times)
 
 if __name__ == '__main__':
     main()

@@ -108,6 +108,35 @@ def plot_cpu_util(*files):
     ax = plt.gca()
     ax.autoscale()
 
+def plot_search_cdf(*files):
+    # parse the sample files
+    log_stats = []
+    for f in files:
+        stats = {}
+        stats['label'] = os.path.basename(f).replace('.csv', '')
+        stats['samples'] = parse_samples(f)
+        log_stats.append(stats)
+
+    print 'Creating plots ...'
+
+    # plot CDF
+    f1 = plt.figure()
+    for stats in log_stats:
+        plot_cdf(stats['samples'], stats['label'])
+    plt.title("CDF of Othello search durations")
+    plt.xlabel("Duration (ns)")
+    plt.ylabel("CDF")
+    plt.grid()
+    plt.legend(loc='lower right')
+    ax = plt.gca()
+    ax.autoscale()
+
+    # print stats
+    for stats in log_stats:
+        print '{} Statistics:'.format(stats['label'])
+        print '\t99% = {}'.format(np.percentile(stats['samples'], 99))
+        print '\t50% = {}'.format(np.percentile(stats['samples'], 50))
+
 def plot_service_cdf(filename):
     # parse the sample files
     label  = os.path.basename(filename).replace('.txt', '')
@@ -179,6 +208,7 @@ def main():
     parser.add_argument('--allQsize', nargs='+', help='Files that contain all queue size samples', required=False)
     parser.add_argument('--expAvgQsize', nargs='+', help='Files that contain expected avg qsize per host', required=False)
     parser.add_argument('--cpuUtil', nargs='+', help='Files that contain avg CPU utilization per host', required=False)
+    parser.add_argument('--searchCDF', nargs='+', help='Files that contain search duration samples', required=False)
     parser.add_argument('--service', type=str, help='Files that contains service time samples', required=False)
     parser.add_argument('--branch', type=str, help='Files that contains branching factor samples', required=False)
     args = parser.parse_args()
@@ -191,6 +221,8 @@ def main():
         plot_exp_avg_qsize(*args.expAvgQsize)
     if args.cpuUtil:
         plot_cpu_util(*args.cpuUtil)
+    if args.searchCDF:
+        plot_search_cdf(*args.searchCDF)
     if args.service:
         plot_service_cdf(args.service)
     if args.branch:
