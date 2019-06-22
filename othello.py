@@ -144,7 +144,7 @@ class OthelloHost(object):
                 if type(msg) == OthelloMapMsg:
                     yield self.env.process(self.handle_map_msg(msg))
                 elif type(msg) == OthelloReduceMsg:
-                    self.handle_reduce_msg(msg)
+                    yield self.env.process(self.handle_reduce_msg(msg))
                 else:
                     print '{}: ERROR: Received invalid msg at host {}:\n\t"{}"'.format(self.env.now, self.ID, str(msg))
 
@@ -165,7 +165,7 @@ class OthelloHost(object):
         """
         # model the service time
         service_time = np.random.choice(OthelloHost.service_samples)
-        print_debug('{}: Host {} servicing request for {} ns'.format(self.env.now, self.ID, service_time))
+        print_debug('{}: Host {} servicing map message for {} ns'.format(self.env.now, self.ID, service_time))
         self.busy_time += service_time
         yield self.env.timeout(service_time)
         # only need to go to msg.max_depth-1 because the final machines will each look one more move ahead
@@ -191,6 +191,11 @@ class OthelloHost(object):
         """Wait to receive all responses then forward result up the tree"""
         if msg.target_msg_id not in self.msg_state:
             print '{}: ERROR: host {} receive response for msg {} but does not have any state for this msg'.format(self.env.now, self.ID, msg.target_msg_id)
+        # model reduce message service time
+        service_time = self.args.reduceService
+        print_debug('{}: Host {} servicing reduce message for {} ns'.format(self.env.now, self.ID, service_time))
+        self.busy_time += service_time
+        yield self.env.timeout(service_time)
         state = self.msg_state[msg.target_msg_id]
         # update state / send result upstream
         state.response_cnt += 1
@@ -382,7 +387,7 @@ def dump_completion_times(completion_times):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--netDelay', type=int, help='NIC-to-NIC communication delay (ns)', default=1000)
-    parser.add_argument('--nicType', type=str, help='NIC-to-CPU interface type (reg, ddio, mem)', default='mem')
+    parser.add_argument('--nicType', type=str, help='NIC-to-CPU interface type (reg, ddio, mem)', default='reg')
     parser.add_argument('--nicBufSize', type=int, help='Buffer size on NIC (# messages) before overflow into LLC/MainMem', default=100)
     parser.add_argument('--llcSize', type=int, help='Num messages that can be stored in the LLC before overflow into MainMem', default=1000)
     parser.add_argument('--memDelay', type=int, help='NIC-to-MainMem delay', default=1000)
@@ -391,19 +396,21 @@ def main():
     parser.add_argument('--memAccessTime', type=int, help='Time to fetch msg from main memory', default=100)
     parser.add_argument('--llcAccessTime', type=int, help='Time to fetch msg from LLC', default=10)
     parser.add_argument('--regAccessTime', type=int, help='Time to fetch msg from register file', default=0)
-    parser.add_argument('--service', type=str, help='File that contains service time samples (ns)', default='dist/service-1000.txt') #'dist/1-level-search.txt')
-    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/branch-5.txt') #'dist/move-count.txt')
+    parser.add_argument('--mapService', type=str, help='File that contains service time samples (ns)', default='dist/1-level-search.txt') #'dist/service-1000.txt')
+    parser.add_argument('--reduceService', type=int, help='Reduce message service time (ns)', default=500)
+    parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/move-count.txt') #'dist/branch-5.txt')
     parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=1000)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=8)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=4)
     parser.add_argument('--runs', type=int, help='The number of simulation runs to perform', default=1)
     args = parser.parse_args()
 
     # Setup and start the simulation
-    OthelloHost.service_samples = parse_file(args.service, float)
+    OthelloHost.service_samples = parse_file(args.mapService, float)
     OthelloHost.branch_samples = parse_file(args.branch, int)
     completion_times = []
     print 'Running Othello Simulation ...'
     for i in range(args.runs):
+        print 'Running simulation {} ...'.format(i)
         env = simpy.Environment() 
         s = OthelloSimulator(env, args)
         env.run()
