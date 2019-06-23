@@ -262,16 +262,16 @@ class OthelloSwitch(object):
         self.hosts[dst].enqueue_msg(msg)
 
     def lookup_comm_delay(self):
-        """The communication delay consists of network fabric delay + delay from NIC into the
+        """The communication delay consists of network fabric delay + round trip delay b/w NIC and the
            appropriate memory location.
         """
         comm_delay = self.args.netDelay
         if self.args.nicType == 'mem':
-            comm_delay += self.args.memDelay
+            comm_delay += 2*self.args.memDelay
         elif self.args.nicType == 'ddio':
-            comm_delay += self.args.llcDelay
+            comm_delay += 2*self.args.llcDelay
         else:
-            comm_delay += self.args.regDelay
+            comm_delay += 2*self.args.regDelay
         return comm_delay
 
 class OthelloSimulator(object):
@@ -390,8 +390,8 @@ def main():
     parser.add_argument('--nicType', type=str, help='NIC-to-CPU interface type (reg, ddio, mem)', default='reg')
     parser.add_argument('--nicBufSize', type=int, help='Buffer size on NIC (# messages) before overflow into LLC/MainMem', default=100)
     parser.add_argument('--llcSize', type=int, help='Num messages that can be stored in the LLC before overflow into MainMem', default=1000)
-    parser.add_argument('--memDelay', type=int, help='NIC-to-MainMem delay', default=1000)
-    parser.add_argument('--llcDelay', type=int, help='NIC-to-LLC delay', default=1000)
+    parser.add_argument('--memDelay', type=int, help='NIC-to-MainMem delay', default=900)
+    parser.add_argument('--llcDelay', type=int, help='NIC-to-LLC delay', default=900)
     parser.add_argument('--regDelay', type=int, help='NIC-to-RegFile delay', default=200)
     parser.add_argument('--memAccessTime', type=int, help='Time to fetch msg from main memory', default=100)
     parser.add_argument('--llcAccessTime', type=int, help='Time to fetch msg from LLC', default=10)
@@ -399,8 +399,8 @@ def main():
     parser.add_argument('--mapService', type=str, help='File that contains service time samples (ns)', default='dist/1-level-search.txt') #'dist/service-1000.txt')
     parser.add_argument('--reduceService', type=int, help='Reduce message service time (ns)', default=500)
     parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/move-count.txt') #'dist/branch-5.txt')
-    parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=1000)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=4)
+    parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=2500)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=5)
     parser.add_argument('--runs', type=int, help='The number of simulation runs to perform', default=1)
     args = parser.parse_args()
 
