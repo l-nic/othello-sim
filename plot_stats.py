@@ -31,6 +31,29 @@ def plot_avg_qsize(*files):
     ax = plt.gca()
     ax.autoscale()
 
+def plot_completion_stats(*files):
+    # parse the sample files
+    log_stats = []
+    for f in files:
+        stats = {}
+        stats['label'] = os.path.basename(f).replace('.csv', '')
+        stats['level'], stats['duration'] = parse_xy_samples(f)
+        log_stats.append(stats)
+
+    print 'Creating plots ...'
+
+    # plot avg qsize time series
+    f1 = plt.figure()
+    for stats in log_stats:
+        l = plt.plot(stats['level'], stats['duration'], label=stats['label'], linestyle='-', marker='o')
+    plt.title("Completion Time vs. Level")
+    plt.xlabel("Search Depth")
+    plt.ylabel("Completion Time (ns)")
+    plt.grid()
+    plt.legend(loc='upper left')
+    ax = plt.gca()
+    ax.autoscale()
+
 def plot_qsize_cdf(*files):
     # parse the sample files
     log_stats = []
@@ -107,6 +130,12 @@ def plot_cpu_util(*files):
     plt.legend(loc='upper right')
     ax = plt.gca()
     ax.autoscale()
+
+    # print stats
+    for stats in log_stats:
+        print '{} Statistics:'.format(stats['label'])
+        print '\t50% = {}'.format(np.percentile(stats['util'], 50))
+        print '\tavg = {}'.format(np.average(stats['util']))
 
 def plot_search_cdf(*files):
     # parse the sample files

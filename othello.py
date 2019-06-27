@@ -5,8 +5,6 @@ import simpy
 import numpy as np
 import os
 
-# np.random.seed(1)
-
 #DEBUG = True
 DEBUG = False
 
@@ -400,9 +398,13 @@ def main():
     parser.add_argument('--reduceService', type=int, help='Reduce message service time (ns)', default=500)
     parser.add_argument('--branch', type=str, help='File that contains branch factor samples', default='dist/move-count.txt') #'dist/branch-5.txt')
     parser.add_argument('--hosts', type=int, help='Number of hosts to use in the simulation', default=2500)
-    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=5)
+    parser.add_argument('--depth', type=int, help='How deep to search into the game tree', default=6)
     parser.add_argument('--runs', type=int, help='The number of simulation runs to perform', default=1)
+    parser.add_argument('--seed', type=int, help='Value to use for random seed', required=False)
     args = parser.parse_args()
+
+    if args.seed:
+        np.random.seed(args.seed)
 
     # Setup and start the simulation
     OthelloHost.service_samples = parse_file(args.mapService, float)
